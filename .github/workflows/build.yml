@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate project (unzip if uploaded as .zip)
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do unzip -oq "$z" -d "_unzipped_${z%.zip}"; done
+          S=$(find . -name settings.gradle.kts -not -path "./.git/*" | head -n1)
+          if [ -z "$S" ]; then echo "settings.gradle.kts not found"; exit 1; fi
+          echo "PROJ=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: cd "$PROJ" && gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MamlThemeApplier-apk
+          path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
+
+      - name: Publish release (direct APK link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(ls "$PROJ"/app/build/outputs/apk/debug/*.apk | head -n1)
+          cp "$APK" MamlThemeApplier.apk
+          gh release create "build-${{ github.run_number }}" MamlThemeApplier.apk -R "$GITHUB_REPOSITORY" --title "Build ${{ github.run_number }}" --notes "Debug APK"
+          
